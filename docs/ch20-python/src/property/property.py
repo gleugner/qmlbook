@@ -12,7 +12,8 @@ class NumberGenerator(QObject):
         QObject.__init__(self)
         self.__number = 42
         self.__max_number = 99
-    
+        self.__name = "Randy"
+
     @Slot()
     def updateNumber(self):
         self.__set_number(random.randint(0, self.__max_number))
@@ -54,8 +55,12 @@ class NumberGenerator(QObject):
     
     def get_number(self):
         return self.__number
+
+    def get_name(self):
+        return self.__name
     
     number = Property(int, get_number, notify=numberChanged)
+    name = Property(str, get_name, constant=True)
 
 
 if __name__ == '__main__':

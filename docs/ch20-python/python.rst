@@ -212,18 +212,26 @@ Finally, the number generator is exposed to QML through a root context property.
     
 .. literalinclude:: src/property/property.py
     :language: python
-    :lines: 61-73
+    :lines: 66-78
     
 In QML, we can bind to the ``number`` as well as the ``maxNumber`` properties of the ``numberGenerator`` object. In the ``onClicked`` handler of the ``Button`` we call the ``updateNumber`` method to generate a new random number and in the ``onValueChanged`` handler of the ``Slider`` we set the ``maxNumber`` property using the ``setMaxNumber`` method. This is because altering the property directly through Javascript would destroy the bindings to the property. By using the setter method explicitly, this is avoided.
     
 .. literalinclude:: src/property/main.qml
 
+As in C++ is it possible to add type qualifiers and modifiers, e.g. ``constant``, to a property. For each quantifier there is a parameter in the constructor of the property class which can be overwriten. The complete list of possible qualifieres and modifiers is described in `in the C++ documentation <https://doc.qt.io/qt-5/properties.html>`_.
+
+.. literalinclude:: src/property/property.py
+    :language: python
+    :lines: 63
+
+
+.. _qmlRegisterType:
 Exposing a Python class to QML
 ------------------------------
 
 Up until now, we've instantiated an object Python and used the ``setContextProperty`` method of the ``rootContext`` to make it available to QML. Being able to instantiate the object from QML allows better control over object life-cycles from QML. To enable this, we need to expose the *class*, instead of the *object*, to QML.
 
-The class that is being exposed to QML is not affected by where it is intantiated. No change is needed to the class definition. However, instead of calling ``setContextProperty``, the ``qmlRegisterType`` function is used. This function comes from the ``PySide2.QtQml`` module and takes five arguments:
+The class that is being exposed to QML is not affected by where it is intantiated. A class which is going to be exposed to QML needs be a subclass of a ``QObject``. However, instead of calling ``setContextProperty``, the ``qmlRegisterType`` function is used. This function comes from the ``PySide2.QtQml`` module and takes five arguments:
 
 - A reference to the class, ``NumberGenerator`` in the example below.
 - A module name, ``'Generators'``.
@@ -236,6 +244,123 @@ The class that is being exposed to QML is not affected by where it is intantiate
 In QML, we need to import the module, e.g. ``Generators 1.0`` and then instantiate the class as ``NumberGenerator { ... }``. The instance now works like any other QML element.
 
 .. literalinclude:: src/class/main.qml
+
+Sharing data between python and QML
+-----------------------------------
+Numeric and boolean types
+^^^^^^^^^^^^^^^^^^^^^^^^^
+Numeric types, as ``bool, int and float`` are the most trivials and supported as follows. Within QML they can be used as described previously.
+
+.. code-block:: python
+
+   count = Property(int, getCount, setCount, notify=countChanged)
+
+
+Sequence types
+^^^^^^^^^^^^^^
+It is possible to convert list types as ''list'' and ''dict'' directly between python and qml. Due to the underlying mechanics this has several drawbacks in terms of performance and scalability which can be solved by models, at the cost of code complexity. 
+Python comes with a variety of sequence type by default. Probably the one, which is used most often is the classical ''list''. QML can directly use them and treats them analogue to the C++ ``QVector`` or ``QList`` as ``QVariantLists``.
+
+The conversion works in both ways, from python to QML and vice versa. In th next code sample a ``list`` is shared between python and QML. It is possible to mix different types, or even nest other sequences and share it, as long as the QML code can handle the input:
+
+.. code-block:: python
+
+   animals = Property(list, getAnimals, setAnimals, notify=animalsChanged)
+
+Within QML the data can be used as `javascript arrays <https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array>`_. It is important to note, that primitve data, as ``int`` and ``string`` are copied during conversions as values, what makes it impossible to change a single value without updating the whole list. That is a major difference to the explicit copy behavior of python. Also reordering or sorting comes with the costs of new copies. Therefore it is discouraged to use lists with a bigger size which change frequently value or order.
+
+.. code-block:: QML
+
+    // zoo.animals[0] = [Bear,Ant,Leopard]
+    // Invalid assignement 
+    zoo.animals[0] = "Goat"
+    
+    // Valid
+    zoo.animals = ["Goat", "Tiger"]
+
+ ..note::
+The above example will not throw any error, hence such kind of mistakes are hard to find.
+
+Within QML lists can be easily used as models which make them very handy to use.
+
+.. code-block:: QML
+            Repeater {
+                model: zoo.animals
+                Rectangle {
+                    color: 'plum'
+                    Layout.fillWidth: true
+                    Layout.minimumHeight: 30
+                    Text {
+                        anchors.centerIn: parent
+                        text: modelData
+                    }
+                }
+            }
+
+It is also possible to share dictionaries with QML. They need to be shared as QVariant.
+
+.. code-block:: python
+
+    enclosure = Property('QVariant', getEnclosure, setEnclosure, notify=enclosureChanged)
+
+The representation on QML side are `javascript objects <https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object>`_ which is a slightly more complex interface than ``list``. As for lists data are also passed as values, therfore they also cannot be changed from QML except by exchanging the whole dictionary. Since you can access the contents of an object as list it easily possible to use the dictionary as model. You will find a sample implementation within the examples.
+
+..note::
+
+Have a look at the `C++ QML data conversion <https://doc.qt.io/qt-5/qtqml-cppintegration-data.html#qvariantlist-and-qvariantmap-to-javascript-array-and-object>_ page for more details. In general it is discouraged to share sequence types between python (and also C++) and QML for production projects due to the memory problematic except for cases where it is clear that the sequences will not change often.
+
+Custom types
+^^^^^^^^^^^^
+It is often necessary to provide access to custom member types. This is easily possible: The new type first needs to be exposed to QML using the ''qmlregistertypes'' as described in the :ref:`_qmlRegisterType` chapter. After registering the type you can use it as any other property and use bindings or connections to the properties of the type.
+The following code will show how to export a custom class to QML:
+
+.. code-block:: python
+    lionKeeper = Property(AnimalKeeper, getLionKeeper, setLionKeeper, notify=lionKeeperChanged)
+
+Within QML the object can be used as any other member object and it is possible to create bindings and assignments as usual:
+.. code-block:: QML
+    Zoo {
+        id: zoo
+        lionKeeper: AnimalKeeper {
+            name: "Charly"
+            age: 23
+            onAgeChanged: {
+                console.warn("Happy Birthday: ", name)
+            }
+        }
+    }
+
+It is also possible to use sequences consisting of custom types. As previously the custom type needs to be registered for qml and then it the sequence can be exposed as normal property.
+
+.. code-block:: python
+    gnuKeepers = Property(list, getGnuKeepers, setGnuKeepers, notify=gnuKeepersChanged)
+
+The access to the elements is provided either as javascript array or javascript object. One important difference to primitive types is that QOjects are always stored as references, therefore it is possible to create bindings to the exposed objects. In the following code listenig a list of objects is used as model for a ``Repeater`` to show a combination of name and age in the the ``Text`` element. 
+
+.. code-block:: QML
+    Repeater {
+        model: zoo.gnuKeepers
+        Rectangle {
+            color: 'plum'
+            Layout.fillWidth: true
+            Layout.minimumWidth: 50
+            Layout.minimumHeight: 30
+            Text {
+                anchors.centerIn: parent
+                text: modelData.name + " " + modelData.age.toString()
+            }
+            MouseArea {
+                anchors.fill: parent
+                onClicked: {
+                    modelData.age = modelData.age + 1
+
+                    // also the underlying data are updated
+                    zoo.printGnuKeepers()
+                }
+            }
+        }
+    }
+
 
 A Model from Python
 -------------------
